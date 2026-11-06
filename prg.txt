@@ -1,0 +1,387 @@
+# ######################################################################
+#                      PROGRAM 1 : INTRODUCTION TO MLOps
+#                      (notebook: program1.ipynb)
+# ######################################################################
+
+# ==================== CELL 1 : install libraries ====================
+# %pip installs into THIS notebook's Python (safer than !pip on Windows)
+# pyngrok is only needed on Colab (manual installs it, harmless here)
+%pip install -q numpy pandas scikit-learn joblib mlflow flask pytest pyngrok requests prometheus_client
+
+# ==================== CELL 2 : configure + initialise Git ====================
+# If you get "'git' is not recognized", Git isn't installed on that PC.
+# Tell the examiner and explain the commands; the ML part still runs.
+!git config --global user.email "student@example.com"
+!git config --global user.name "MLOps Student"
+!git init -q
+!git add .
+!git commit -m "Initial commit" -q || echo "Nothing to commit yet"
+!git log --oneline
+
+# ==================== CELL 3 : imports ====================
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+from sklearn.datasets import load_iris
+
+# ==================== CELL 4 : load dataset ====================
+iris = load_iris()
+X = pd.DataFrame(iris.data, columns=iris.feature_names)
+y = pd.Series(iris.target)
+X.head()
+
+# ==================== CELL 5 : train-test split (70/30) ====================
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.3, random_state=42
+)
+print(X_train.shape, X_test.shape)          # (105, 4) (45, 4)
+
+# ==================== CELL 6 : train Random Forest ====================
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
+
+# ==================== CELL 7 : predict + evaluate ====================
+y_pred = model.predict(X_test)
+accuracy = accuracy_score(y_test, y_pred)
+print(f"Accuracy: {accuracy * 100:.2f}%")
+# EXPECTED: Accuracy: 100.00%
+
+
+# ######################################################################
+#           PROGRAM 2 : BUILDING AND DEPLOYING A SIMPLE ML MODEL
+#           (notebook: program2.ipynb  -- same folder)
+# ######################################################################
+
+# ==================== CELL 1 : imports ====================
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error
+from sklearn.datasets import load_diabetes
+import joblib
+
+# ==================== CELL 2 : load dataset + split (80/20) ====================
+data = load_diabetes()
+X = pd.DataFrame(data.data, columns=data.feature_names)
+y = pd.Series(data.target)
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42          # test_size, NOT train_size!
+)
+
+# ==================== CELL 3 : train + evaluate ====================
+model = LinearRegression()
+model.fit(X_train, y_train)
+
+y_pred = model.predict(X_test)
+mse = mean_squared_error(y_test, y_pred)
+print(f"Mean Squared Error: {mse}")
+# EXPECTED: Mean Squared Error: 2900.193628493482
+
+# ==================== CELL 4 : save + reload with joblib ====================
+joblib.dump(model, 'diabetes_model.joblib')
+
+loaded_model = joblib.load('diabetes_model.joblib')
+loaded_y_pred = loaded_model.predict(X_test)
+loaded_mse = mean_squared_error(y_test, loaded_y_pred)
+print(f"Loaded Model MSE: {loaded_mse}")
+# EXPECTED: Loaded Model MSE: 2900.193628493482
+
+# ==================== CELL 5 : write the Flask app (%%writefile = FIRST line) ====================
+%%writefile app.py
+from flask import Flask, request, jsonify
+import joblib
+import numpy as np
+
+app = Flask(__name__)
+model = joblib.load('diabetes_model.joblib')
+
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({'status': 'API is running'})
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    data = request.get_json(force=True)
+    features = np.array(data['features']).reshape(1, -1)
+    prediction = model.predict(features)
+    return jsonify({'prediction': float(prediction[0])})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+
+# ==================== CELL 6 : run Flask in background thread + test it ====================
+# Windows may show a Firewall popup -> click Allow (or Cancel; localhost still works)
+# "Address already in use" -> Kernel > Restart, then Run All
+import threading, time, requests
+
+def run_app():
+    from app import app as flask_app
+    flask_app.run(host='0.0.0.0', port=5000, use_reloader=False)
+
+threading.Thread(target=run_app, daemon=True).start()
+time.sleep(2)
+
+sample_features = X_test.iloc[0].tolist()
+response = requests.post('http://127.0.0.1:5000/predict', json={'features': sample_features})
+print(response.json())
+# EXPECTED: {'prediction': 139.54755840379596}
+# (manual prints 155.61 -- that's a typo in the manual; 139.55 is correct)
+
+
+# ######################################################################
+#             PROGRAM 3 : AUTOMATING ML WORKFLOWS WITH CI/CD
+#             (notebook: program3.ipynb  -- same folder)
+# ######################################################################
+
+# ==================== CELL 1 : train.py (used by ci.yml; manual doesn't give it) ====================
+%%writefile train.py
+import pandas as pd
+import joblib
+from sklearn.datasets import load_diabetes
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error
+
+data = load_diabetes()
+X = pd.DataFrame(data.data, columns=data.feature_names)
+y = pd.Series(data.target)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+model = LinearRegression()
+model.fit(X_train, y_train)
+print(f"Mean Squared Error: {mean_squared_error(y_test, model.predict(X_test))}")
+
+joblib.dump(model, 'diabetes_model.joblib')
+print("Model saved to diabetes_model.joblib")
+
+# ==================== CELL 2 : run train.py ====================
+%run train.py
+# EXPECTED: Mean Squared Error: 2900.19...  /  Model saved to diabetes_model.joblib
+
+# ==================== CELL 3 : the unit tests (%%writefile = FIRST line) ====================
+%%writefile test_model.py
+import joblib
+import numpy as np
+
+def test_model_prediction():
+    model = joblib.load('diabetes_model.joblib')
+    input_data = np.array(
+        [0.02, 0.07, 0.03, 0.02, 0.01, 0.03, 0.01, 0.04, 0.03, 0.01]
+    ).reshape(1, -1)
+    prediction = model.predict(input_data)
+    assert isinstance(prediction[0], (float, np.floating)), \
+        f"Expected float but got {type(prediction[0])}"
+
+def test_model_output_shape():
+    model = joblib.load('diabetes_model.joblib')
+    input_data = np.zeros((5, 10))
+    predictions = model.predict(input_data)
+    assert predictions.shape == (5,), f"Expected shape (5,) but got {predictions.shape}"
+
+# ==================== CELL 4 : run the tests ====================
+!pytest test_model.py -v
+# If Windows says "'pytest' is not recognized", use these 2 lines instead:
+#   import pytest
+#   pytest.main(["test_model.py", "-v"])
+# EXPECTED:
+#   test_model.py::test_model_prediction PASSED
+#   test_model.py::test_model_output_shape PASSED
+#   ===== 2 passed, 2 warnings in ...s =====
+
+# ==================== CELL 5 : create the .github/workflows folder ====================
+import os
+os.makedirs('.github/workflows', exist_ok=True)
+
+# ==================== CELL 6 : the GitHub Actions workflow (%%writefile = FIRST line) ====================
+%%writefile .github/workflows/ci.yml
+name: MLOps CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas scikit-learn joblib pytest flask
+      - name: Train model
+        run: python train.py
+      - name: Run unit tests
+        run: pytest test_model.py -v
+
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Deploy to cloud platform
+        run: |
+          echo "Deploying trained model and Flask API..."
+          # gcloud run deploy mlops-api --source . --region us-central1
+
+# ==================== CELL 7 : show the workflow file was created ====================
+print(open('.github/workflows/ci.yml').read())
+# NOTE: GitHub Actions runs only on GitHub's servers -- the YAML file is the deliverable.
+
+
+# ######################################################################
+#               PROGRAM 4 : EXPERIMENT TRACKING WITH MLflow
+#               (notebook: program4.ipynb  -- same folder)
+# ######################################################################
+
+# ==================== CELL 1 : imports ====================
+import mlflow
+import mlflow.sklearn
+import pandas as pd
+from sklearn.datasets import load_diabetes
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error
+
+# ==================== CELL 2 : load dataset + split + set experiment ====================
+data = load_diabetes()
+X = pd.DataFrame(data.data, columns=data.feature_names)
+y = pd.Series(data.target)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+mlflow.set_experiment("diabetes-regression")
+
+# ==================== CELL 3 : train + log multiple models ====================
+models_to_try = {
+    "LinearRegression": LinearRegression(),
+    "Ridge(alpha=1.0)": Ridge(alpha=1.0),
+    "RandomForest(n_estimators=100)": RandomForestRegressor(n_estimators=100, random_state=42),
+}
+
+for name, mdl in models_to_try.items():
+    with mlflow.start_run(run_name=name):
+        mdl.fit(X_train, y_train)
+        y_pred = mdl.predict(X_test)
+        mse = mean_squared_error(y_test, y_pred)
+
+        mlflow.log_param("model_type", name)       # P - param
+        mlflow.log_metric("mse", mse)              # M - metric
+        mlflow.sklearn.log_model(mdl, "model")     # A - artifact
+
+        print(f"{name}: MSE = {mse:.2f}")
+# EXPECTED:
+#   LinearRegression: MSE = 2900.19
+#   Ridge(alpha=1.0): MSE = 3077.42
+#   RandomForest(n_estimators=100): MSE = 2952.01
+# (red "artifact_path is deprecated" / "signature" warnings are harmless)
+
+# ==================== CELL 4 : launch the MLflow UI (local PC -> no ngrok needed) ====================
+# sys.executable -m mlflow  = works on Windows even if 'mlflow' isn't on PATH
+import subprocess, time, sys
+mlflow_process = subprocess.Popen([sys.executable, "-m", "mlflow", "ui", "--port", "5001"])
+time.sleep(5)
+print("MLflow UI available at: http://127.0.0.1:5001")
+# Open that link in the browser -> diabetes-regression -> tick 3 runs -> Compare
+# Alternative: open Anaconda Prompt in this folder and run:  mlflow ui --port 5001
+
+# ==================== CELL 5 (ONLY on Colab -- skip on the lab PC) : ngrok tunnel, as in manual ====================
+# from pyngrok import ngrok
+# mlflow_process = subprocess.Popen(["mlflow", "ui", "--port", "5001"])
+# time.sleep(3)
+# public_url = ngrok.connect(5001)
+# print("MLflow UI available at:", public_url)
+
+
+# ######################################################################
+#               PROGRAM 5 : MODEL MONITORING AND LOGGING
+#               (notebook: program5.ipynb  -- same folder)
+# ######################################################################
+
+# ==================== CELL 1 : imports ====================
+import logging
+import time
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error
+from sklearn.datasets import load_diabetes
+
+# ==================== CELL 2 : logging config (console + file) ====================
+# If no log lines appear (e.g. after re-running), add  force=True  inside basicConfig(...)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(), logging.FileHandler('mlops_monitoring.log')]
+)
+
+# ==================== CELL 3 : load dataset + split ====================
+data = load_diabetes()
+X = pd.DataFrame(data.data, columns=data.feature_names)
+y = pd.Series(data.target)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# ==================== CELL 4 : train the model (with logs) ====================
+model = LinearRegression()
+logging.info("Starting model training...")
+model.fit(X_train, y_train)
+logging.info("Model training completed.")
+
+# ==================== CELL 5 : evaluate ====================
+y_pred = model.predict(X_test)
+mse = mean_squared_error(y_test, y_pred)
+logging.info(f"Mean Squared Error: {mse}")
+
+# ==================== CELL 6 : prediction latency ====================
+start_time = time.time()
+prediction = model.predict(X_test)
+end_time = time.time()
+latency = end_time - start_time
+logging.info(f"Prediction latency: {latency:.6f} seconds")
+
+# ==================== CELL 7 : performance-degradation check + alert ====================
+MSE_THRESHOLD = 3500.0          # demo the alert: change to 2500.0 -> WARNING line appears
+if mse > MSE_THRESHOLD:
+    logging.warning(f"ALERT: Model MSE {mse:.2f} exceeded threshold {MSE_THRESHOLD}")
+else:
+    logging.info(f"MSE within acceptable range (threshold={MSE_THRESHOLD}).")
+# EXPECTED (times will differ):
+#   ... - INFO - Starting model training...
+#   ... - INFO - Model training completed.
+#   ... - INFO - Mean Squared Error: 2900.193628493482
+#   ... - INFO - Prediction latency: 0.000842 seconds
+#   ... - INFO - MSE within acceptable range (threshold=3500.0).
+
+# ==================== CELL 8 : install prometheus_client ====================
+%pip install -q prometheus_client
+
+# ==================== CELL 9 : expose metrics for Prometheus ====================
+# Run ONCE. "Duplicated timeseries" or "Address already in use" -> Restart kernel, Run All
+from prometheus_client import start_http_server, Gauge
+
+MSE_GAUGE = Gauge('model_mse', 'Mean Squared Error of the deployed model')
+LATENCY_GAUGE = Gauge('model_prediction_latency_seconds', 'Prediction latency in seconds')
+
+start_http_server(8000)
+MSE_GAUGE.set(mse)
+LATENCY_GAUGE.set(latency)
+print("Metrics exposed at http://127.0.0.1:8000/metrics")
+# Open the link -> Ctrl+F "model_" -> model_mse 2900.19..., model_prediction_latency_seconds ...
+# In production: Prometheus scrapes this endpoint, and a Grafana
+# alert rule (e.g. model_mse > 3500) triggers a notification.
+
+# ==================== CELL 10 : show the log file ====================
+print(open('mlops_monitoring.log').read())
