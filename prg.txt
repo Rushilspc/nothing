@@ -1,387 +1,544 @@
-# ######################################################################
-#                      PROGRAM 1 : INTRODUCTION TO MLOps
-#                      (notebook: program1.ipynb)
-# ######################################################################
-
-# ==================== CELL 1 : install libraries ====================
-# %pip installs into THIS notebook's Python (safer than !pip on Windows)
-# pyngrok is only needed on Colab (manual installs it, harmless here)
-%pip install -q numpy pandas scikit-learn joblib mlflow flask pytest pyngrok requests prometheus_client
-
-# ==================== CELL 2 : configure + initialise Git ====================
-# If you get "'git' is not recognized", Git isn't installed on that PC.
-# Tell the examiner and explain the commands; the ML part still runs.
-!git config --global user.email "student@example.com"
-!git config --global user.name "MLOps Student"
-!git init -q
-!git add .
-!git commit -m "Initial commit" -q || echo "Nothing to commit yet"
-!git log --oneline
-
-# ==================== CELL 3 : imports ====================
+Program 1 - 
 import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.impute import KNNImputer
+
+df = sns.load_dataset('titanic')
+df = df[['age', 'fare', 'sibsp', 'parch']]
+
+print("Missing values:")
+print(df.isnull().sum())
+
+mean_df = df.fillna(df.mean())
+median_df = df.fillna(df.median())
+mode_df = df.fillna(df.mode().iloc[0])
+
+print("Mean Imputation:\n", mean_df.head())
+print("\nMedian Imputation:\n", median_df.head())
+print("\nMode Imputation:\n", mode_df.head())
+
+knn = KNNImputer(n_neighbors=5)
+knn_df = pd.DataFrame(
+    knn.fit_transform(df),
+    columns=df.columns
+)
+print("KNN Imputation:")
+print(knn_df.head())
+
+print("Original missing values:")
+print(df.isnull().sum())
+print("\nAfter KNN Imputation:")
+print(knn_df.isnull().sum())
+
+df.plot(kind='box', figsize=(8,4))
+plt.title("Box Plot for Outlier Detection")
+plt.show()
+
+plt.scatter(knn_df['age'], knn_df['fare'])
+plt.xlabel("Age")
+plt.ylabel("Fare")
+plt.title("Age vs Fare")
+plt.show()
+
+Q1 = knn_df.quantile(0.25)
+Q3 = knn_df.quantile(0.75)
+IQR = Q3 - Q1
+
+outliers = ((knn_df < Q1 - 1.5*IQR) |
+            (knn_df > Q3 + 1.5*IQR))
+
+print("Number of outliers:")
+print(outliers.sum())
+
+cleaned_df = knn_df[~outliers.any(axis=1)]
+print("Original rows:", len(knn_df))
+print("Rows after outlier treatment:", len(cleaned_df))
+
+print(cleaned_df.head())
+
+print("Missing values:")
+print(cleaned_df.isnull().sum())
+print("\nCleaned Dataset:")
+print(cleaned_df.head())
+
+
+
+Program 2 - 
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+from sklearn.datasets import fetch_california_housing
+from sklearn.preprocessing import MinMaxScaler, StandardScaler, PowerTransformer
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, r2_score
+
+data = fetch_california_housing(as_frame=True)
+df = data.frame
+display(df.head())
+
+X = df[['MedInc']]
+y = df['MedHouseVal']
+
+print(X['MedInc'].skew())
+
+normalizer = MinMaxScaler()
+X_normalized = normalizer.fit_transform(X)
+print(X_normalized[:5])
+
+standardizer = StandardScaler()
+X_standardized = standardizer.fit_transform(X)
+print(X_standardized[:5])
+
+X_log = np.log1p(X)
+print(X_log['MedInc'].skew())
+
+power = PowerTransformer(method='yeo-johnson')
+X_power = power.fit_transform(X)
+print(pd.Series(X_power[:, 0]).skew())
+
+plt.figure(figsize=(12, 4))
+plt.subplot(1, 3, 1)
+plt.hist(X['MedInc'], bins=30, edgecolor='black', color='lightblue')
+plt.subplot(1, 3, 2)
+plt.hist(X_log['MedInc'], bins=30, edgecolor='black', color='lightgreen')
+plt.subplot(1, 3, 3)
+plt.hist(X_power[:, 0], bins=30, edgecolor='black', color='salmon')
+plt.tight_layout()
+plt.show()
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+model = LinearRegression()
+model.fit(X_train, y_train)
+pred = model.predict(X_test)
+
+scaler = StandardScaler()
+X_train_s = scaler.fit_transform(X_train)
+X_test_s = scaler.transform(X_test)
+model_s = LinearRegression()
+model_s.fit(X_train_s, y_train)
+pred_s = model_s.predict(X_test_s)
+
+X_train_log = np.log1p(X_train)
+X_test_log = np.log1p(X_test)
+model_log = LinearRegression()
+model_log.fit(X_train_log, y_train)
+pred_log = model_log.predict(X_test_log)
+
+results = pd.DataFrame({
+    'Model': ['Original', 'Standardized', 'Log Transformed'],
+    'R2 Score': [
+        r2_score(y_test, pred),
+        r2_score(y_test, pred_s),
+        r2_score(y_test, pred_log)
+    ],
+    'RMSE': [
+        np.sqrt(mean_squared_error(y_test, pred)),
+        np.sqrt(mean_squared_error(y_test, pred_s)),
+        np.sqrt(mean_squared_error(y_test, pred_log))
+    ]
+})
+
+display(results)
+
+
+Program 3 -
+import pandas as pd
+import seaborn as sns
+from sklearn.preprocessing import OneHotEncoder, LabelEncoder
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
-from sklearn.datasets import load_iris
 
-# ==================== CELL 4 : load dataset ====================
-iris = load_iris()
-X = pd.DataFrame(iris.data, columns=iris.feature_names)
-y = pd.Series(iris.target)
-X.head()
+df = sns.load_dataset('titanic')
+df = df[['survived', 'age', 'sex', 'embarked', 'class']]
+df = df.dropna()
 
-# ==================== CELL 5 : train-test split (70/30) ====================
+X = df.drop('survived', axis=1)
+y = df['survived']
+
+onehot = pd.get_dummies(X, columns=['sex', 'embarked', 'class'], dtype=int)
+
+label = X.copy()
+for col in ['sex', 'embarked', 'class']:
+    label[col] = LabelEncoder().fit_transform(label[col])
+
+target = X.copy()
+for col in ['sex', 'embarked', 'class']:
+    means = pd.DataFrame({'feature': X[col], 'target': y}).groupby('feature')['target'].mean()
+    target[col] = X[col].map(means)
+
+memory = pd.DataFrame({
+    'Encoding': ['One-Hot', 'Label', 'Target'],
+    'Memory (KB)': [
+        onehot.memory_usage(deep=True).sum() / 1024,
+        label.memory_usage(deep=True).sum() / 1024,
+        target.memory_usage(deep=True).sum() / 1024
+    ]
+})
+
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.3, random_state=42
+    X, y, test_size=0.2, random_state=42
 )
-print(X_train.shape, X_test.shape)          # (105, 4) (45, 4)
 
-# ==================== CELL 6 : train Random Forest ====================
-model = RandomForestClassifier(n_estimators=100, random_state=42)
-model.fit(X_train, y_train)
+X_train_oh = pd.get_dummies(X_train, columns=['sex', 'embarked', 'class'], dtype=int)
+X_test_oh = pd.get_dummies(X_test, columns=['sex', 'embarked', 'class'], dtype=int)
+X_test_oh = X_test_oh.reindex(columns=X_train_oh.columns, fill_value=0)
+model_oh = LogisticRegression(max_iter=1000)
+model_oh.fit(X_train_oh, y_train)
+pred_oh = model_oh.predict(X_test_oh)
 
-# ==================== CELL 7 : predict + evaluate ====================
-y_pred = model.predict(X_test)
-accuracy = accuracy_score(y_test, y_pred)
-print(f"Accuracy: {accuracy * 100:.2f}%")
-# EXPECTED: Accuracy: 100.00%
+X_train_le = X_train.copy()
+X_test_le = X_test.copy()
+for col in ['sex', 'embarked', 'class']:
+    le = LabelEncoder()
+    X_train_le[col] = le.fit_transform(X_train_le[col])
+    X_test_le[col] = le.transform(X_test_le[col])
+model_le = LogisticRegression(max_iter=1000)
+model_le.fit(X_train_le, y_train)
+pred_le = model_le.predict(X_test_le)
+
+X_train_te = X_train.copy()
+X_test_te = X_test.copy()
+for col in ['sex', 'embarked', 'class']:
+    means = pd.DataFrame({
+        'feature': X_train[col],
+        'target': y_train
+    }).groupby('feature')['target'].mean()
+    X_train_te[col] = X_train[col].map(means)
+    X_test_te[col] = X_test[col].map(means)
+model_te = LogisticRegression(max_iter=1000)
+model_te.fit(X_train_te, y_train)
+pred_te = model_te.predict(X_test_te)
+
+results = pd.DataFrame({
+    'Encoding': ['One-Hot', 'Label', 'Target'],
+    'Accuracy': [
+        accuracy_score(y_test, pred_oh),
+        accuracy_score(y_test, pred_le),
+        accuracy_score(y_test, pred_te)
+    ]
+})
 
 
-# ######################################################################
-#           PROGRAM 2 : BUILDING AND DEPLOYING A SIMPLE ML MODEL
-#           (notebook: program2.ipynb  -- same folder)
-# ######################################################################
 
-# ==================== CELL 1 : imports ====================
+
+Program 4 - 
 import pandas as pd
-import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+df = sns.load_dataset('iris')
+display(df.head())
+
+num = df.select_dtypes(include='number')
+display(num.head())
+
+print("Mean:")
+print(num.mean())
+print("\nMedian:")
+print(num.median())
+print("\nMode:")
+print(num.mode().iloc[0])
+
+num.hist(figsize=(10, 6))
+plt.suptitle("Feature Distributions")
+plt.show()
+
+num.plot(kind='box', figsize=(8, 5))
+plt.title("Box Plots")
+plt.show()
+
+result = pd.DataFrame({
+    'Skewness': num.skew(),
+    'Kurtosis': num.kurt()
+})
+display(result)
+
+sns.scatterplot(data=df, x='sepal_length', y='petal_length', hue='species')
+plt.title("Sepal Length vs Petal Length")
+plt.show()
+
+sns.pairplot(df, hue='species')
+plt.show()
+
+plt.figure(figsize=(7, 5))
+sns.heatmap(num.corr(), annot=True, cmap='coolwarm')
+plt.title("Correlation Heatmap")
+plt.show()
+
+pearson = num.corr(method='pearson')
+print("Pearson Correlation:")
+display(pearson)
+
+spearman = num.corr(method='spearman')
+print("Spearman Correlation:")
+display(spearman)
+
+
+Program 5 -
+import pandas as pd
+from sklearn.datasets import load_diabetes
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error
-from sklearn.datasets import load_diabetes
-import joblib
+from sklearn.metrics import r2_score
+from statsmodels.stats.outliers_influence import variance_inflation_factor
 
-# ==================== CELL 2 : load dataset + split (80/20) ====================
-data = load_diabetes()
-X = pd.DataFrame(data.data, columns=data.feature_names)
-y = pd.Series(data.target)
+data = load_diabetes(as_frame=True)
+X = data.data
+y = data.target
+
+print(X.head())
+
+vif = pd.DataFrame()
+vif["Feature"] = X.columns
+vif["VIF"] = [variance_inflation_factor(X.values, i)
+              for i in range(X.shape[1])]
+
+print(vif)
+
+while True:
+    vif = pd.DataFrame()
+    vif["Feature"] = X.columns
+    vif["VIF"] = [variance_inflation_factor(X.values, i)
+                  for i in range(X.shape[1])]
+
+    if vif["VIF"].max() <= 5:
+        break
+
+    feature = vif.loc[vif["VIF"].idxmax(), "Feature"]
+    print("Removing:", feature)
+    X = X.drop(columns=[feature])
+
+print("\nRemaining Features:")
+print(X.columns)
 
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42          # test_size, NOT train_size!
+    X, y, test_size=0.2, random_state=42
 )
 
-# ==================== CELL 3 : train + evaluate ====================
 model = LinearRegression()
 model.fit(X_train, y_train)
 
 y_pred = model.predict(X_test)
-mse = mean_squared_error(y_test, y_pred)
-print(f"Mean Squared Error: {mse}")
-# EXPECTED: Mean Squared Error: 2900.193628493482
 
-# ==================== CELL 4 : save + reload with joblib ====================
-joblib.dump(model, 'diabetes_model.joblib')
+print("R2 Score After Removing Features:", r2_score(y_test, y_pred))
 
-loaded_model = joblib.load('diabetes_model.joblib')
-loaded_y_pred = loaded_model.predict(X_test)
-loaded_mse = mean_squared_error(y_test, loaded_y_pred)
-print(f"Loaded Model MSE: {loaded_mse}")
-# EXPECTED: Loaded Model MSE: 2900.193628493482
+X_original = data.data
 
-# ==================== CELL 5 : write the Flask app (%%writefile = FIRST line) ====================
-%%writefile app.py
-from flask import Flask, request, jsonify
-import joblib
-import numpy as np
-
-app = Flask(__name__)
-model = joblib.load('diabetes_model.joblib')
-
-@app.route('/', methods=['GET'])
-def home():
-    return jsonify({'status': 'API is running'})
-
-@app.route('/predict', methods=['POST'])
-def predict():
-    data = request.get_json(force=True)
-    features = np.array(data['features']).reshape(1, -1)
-    prediction = model.predict(features)
-    return jsonify({'prediction': float(prediction[0])})
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
-
-# ==================== CELL 6 : run Flask in background thread + test it ====================
-# Windows may show a Firewall popup -> click Allow (or Cancel; localhost still works)
-# "Address already in use" -> Kernel > Restart, then Run All
-import threading, time, requests
-
-def run_app():
-    from app import app as flask_app
-    flask_app.run(host='0.0.0.0', port=5000, use_reloader=False)
-
-threading.Thread(target=run_app, daemon=True).start()
-time.sleep(2)
-
-sample_features = X_test.iloc[0].tolist()
-response = requests.post('http://127.0.0.1:5000/predict', json={'features': sample_features})
-print(response.json())
-# EXPECTED: {'prediction': 139.54755840379596}
-# (manual prints 155.61 -- that's a typo in the manual; 139.55 is correct)
-
-
-# ######################################################################
-#             PROGRAM 3 : AUTOMATING ML WORKFLOWS WITH CI/CD
-#             (notebook: program3.ipynb  -- same folder)
-# ######################################################################
-
-# ==================== CELL 1 : train.py (used by ci.yml; manual doesn't give it) ====================
-%%writefile train.py
-import pandas as pd
-import joblib
-from sklearn.datasets import load_diabetes
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error
-
-data = load_diabetes()
-X = pd.DataFrame(data.data, columns=data.feature_names)
-y = pd.Series(data.target)
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(
+    X_original, y, test_size=0.2, random_state=42
+)
 
 model = LinearRegression()
 model.fit(X_train, y_train)
-print(f"Mean Squared Error: {mean_squared_error(y_test, model.predict(X_test))}")
 
-joblib.dump(model, 'diabetes_model.joblib')
-print("Model saved to diabetes_model.joblib")
+y_pred = model.predict(X_test)
 
-# ==================== CELL 2 : run train.py ====================
-%run train.py
-# EXPECTED: Mean Squared Error: 2900.19...  /  Model saved to diabetes_model.joblib
+print("R2 Score Before Removing Features:", r2_score(y_test, y_pred))
 
-# ==================== CELL 3 : the unit tests (%%writefile = FIRST line) ====================
-%%writefile test_model.py
-import joblib
-import numpy as np
-
-def test_model_prediction():
-    model = joblib.load('diabetes_model.joblib')
-    input_data = np.array(
-        [0.02, 0.07, 0.03, 0.02, 0.01, 0.03, 0.01, 0.04, 0.03, 0.01]
-    ).reshape(1, -1)
-    prediction = model.predict(input_data)
-    assert isinstance(prediction[0], (float, np.floating)), \
-        f"Expected float but got {type(prediction[0])}"
-
-def test_model_output_shape():
-    model = joblib.load('diabetes_model.joblib')
-    input_data = np.zeros((5, 10))
-    predictions = model.predict(input_data)
-    assert predictions.shape == (5,), f"Expected shape (5,) but got {predictions.shape}"
-
-# ==================== CELL 4 : run the tests ====================
-!pytest test_model.py -v
-# If Windows says "'pytest' is not recognized", use these 2 lines instead:
-#   import pytest
-#   pytest.main(["test_model.py", "-v"])
-# EXPECTED:
-#   test_model.py::test_model_prediction PASSED
-#   test_model.py::test_model_output_shape PASSED
-#   ===== 2 passed, 2 warnings in ...s =====
-
-# ==================== CELL 5 : create the .github/workflows folder ====================
-import os
-os.makedirs('.github/workflows', exist_ok=True)
-
-# ==================== CELL 6 : the GitHub Actions workflow (%%writefile = FIRST line) ====================
-%%writefile .github/workflows/ci.yml
-name: MLOps CI/CD Pipeline
-
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
-jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install numpy pandas scikit-learn joblib pytest flask
-      - name: Train model
-        run: python train.py
-      - name: Run unit tests
-        run: pytest test_model.py -v
-
-  deploy:
-    needs: build-and-test
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Deploy to cloud platform
-        run: |
-          echo "Deploying trained model and Flask API..."
-          # gcloud run deploy mlops-api --source . --region us-central1
-
-# ==================== CELL 7 : show the workflow file was created ====================
-print(open('.github/workflows/ci.yml').read())
-# NOTE: GitHub Actions runs only on GitHub's servers -- the YAML file is the deliverable.
+print("VIF identifies features with multicollinearity.")
+print("Features with VIF greater than 5 are removed.")
+print("R2 scores before and after removal are compared.")
+print("A higher R2 score indicates better model performance.")
 
 
-# ######################################################################
-#               PROGRAM 4 : EXPERIMENT TRACKING WITH MLflow
-#               (notebook: program4.ipynb  -- same folder)
-# ######################################################################
 
-# ==================== CELL 1 : imports ====================
-import mlflow
-import mlflow.sklearn
+Program 6-
 import pandas as pd
-from sklearn.datasets import load_diabetes
+import matplotlib.pyplot as plt
+from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression, Ridge
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_squared_error
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import classification_report
+from imblearn.over_sampling import RandomOverSampler, SMOTE
+from imblearn.under_sampling import RandomUnderSampler
 
-# ==================== CELL 2 : load dataset + split + set experiment ====================
-data = load_diabetes()
-X = pd.DataFrame(data.data, columns=data.feature_names)
-y = pd.Series(data.target)
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+X, y = make_classification(
+    n_samples=1000, n_features=5, weights=[0.9, 0.1],
+    random_state=42
+)
 
-mlflow.set_experiment("diabetes-regression")
+print(pd.Series(y).value_counts())
 
-# ==================== CELL 3 : train + log multiple models ====================
-models_to_try = {
-    "LinearRegression": LinearRegression(),
-    "Ridge(alpha=1.0)": Ridge(alpha=1.0),
-    "RandomForest(n_estimators=100)": RandomForestRegressor(n_estimators=100, random_state=42),
+pd.Series(y).value_counts().plot(kind='bar')
+plt.title("Original Class Distribution")
+plt.xlabel("Class")
+plt.ylabel("Count")
+plt.show()
+
+over = RandomOverSampler(random_state=42)
+under = RandomUnderSampler(random_state=42)
+smote = SMOTE(random_state=42)
+
+X_over, y_over = over.fit_resample(X, y)
+X_under, y_under = under.fit_resample(X, y)
+X_smote, y_smote = smote.fit_resample(X, y)
+
+print("Oversampling:\n", pd.Series(y_over).value_counts())
+print("\nUndersampling:\n", pd.Series(y_under).value_counts())
+print("\nSMOTE:\n", pd.Series(y_smote).value_counts())
+
+distributions = {
+    "Original": y,
+    "Oversampling": y_over,
+    "Undersampling": y_under,
+    "SMOTE": y_smote
 }
 
-for name, mdl in models_to_try.items():
-    with mlflow.start_run(run_name=name):
-        mdl.fit(X_train, y_train)
-        y_pred = mdl.predict(X_test)
-        mse = mean_squared_error(y_test, y_pred)
+for name, labels in distributions.items():
+    pd.Series(labels).value_counts().sort_index().plot(
+        kind='bar', title=name
+    )
+    plt.xlabel("Class")
+    plt.ylabel("Count")
+    plt.show()
 
-        mlflow.log_param("model_type", name)       # P - param
-        mlflow.log_metric("mse", mse)              # M - metric
-        mlflow.sklearn.log_model(mdl, "model")     # A - artifact
-
-        print(f"{name}: MSE = {mse:.2f}")
-# EXPECTED:
-#   LinearRegression: MSE = 2900.19
-#   Ridge(alpha=1.0): MSE = 3077.42
-#   RandomForest(n_estimators=100): MSE = 2952.01
-# (red "artifact_path is deprecated" / "signature" warnings are harmless)
-
-# ==================== CELL 4 : launch the MLflow UI (local PC -> no ngrok needed) ====================
-# sys.executable -m mlflow  = works on Windows even if 'mlflow' isn't on PATH
-import subprocess, time, sys
-mlflow_process = subprocess.Popen([sys.executable, "-m", "mlflow", "ui", "--port", "5001"])
-time.sleep(5)
-print("MLflow UI available at: http://127.0.0.1:5001")
-# Open that link in the browser -> diabetes-regression -> tick 3 runs -> Compare
-# Alternative: open Anaconda Prompt in this folder and run:  mlflow ui --port 5001
-
-# ==================== CELL 5 (ONLY on Colab -- skip on the lab PC) : ngrok tunnel, as in manual ====================
-# from pyngrok import ngrok
-# mlflow_process = subprocess.Popen(["mlflow", "ui", "--port", "5001"])
-# time.sleep(3)
-# public_url = ngrok.connect(5001)
-# print("MLflow UI available at:", public_url)
-
-
-# ######################################################################
-#               PROGRAM 5 : MODEL MONITORING AND LOGGING
-#               (notebook: program5.ipynb  -- same folder)
-# ######################################################################
-
-# ==================== CELL 1 : imports ====================
-import logging
-import time
-import pandas as pd
-import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error
-from sklearn.datasets import load_diabetes
-
-# ==================== CELL 2 : logging config (console + file) ====================
-# If no log lines appear (e.g. after re-running), add  force=True  inside basicConfig(...)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler(), logging.FileHandler('mlops_monitoring.log')]
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
 )
 
-# ==================== CELL 3 : load dataset + split ====================
-data = load_diabetes()
-X = pd.DataFrame(data.data, columns=data.feature_names)
-y = pd.Series(data.target)
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-# ==================== CELL 4 : train the model (with logs) ====================
-model = LinearRegression()
-logging.info("Starting model training...")
+model = DecisionTreeClassifier(random_state=42)
 model.fit(X_train, y_train)
-logging.info("Model training completed.")
 
-# ==================== CELL 5 : evaluate ====================
 y_pred = model.predict(X_test)
-mse = mean_squared_error(y_test, y_pred)
-logging.info(f"Mean Squared Error: {mse}")
 
-# ==================== CELL 6 : prediction latency ====================
-start_time = time.time()
-prediction = model.predict(X_test)
-end_time = time.time()
-latency = end_time - start_time
-logging.info(f"Prediction latency: {latency:.6f} seconds")
+print("Original Dataset:")
+print(classification_report(y_test, y_pred, zero_division=0))
 
-# ==================== CELL 7 : performance-degradation check + alert ====================
-MSE_THRESHOLD = 3500.0          # demo the alert: change to 2500.0 -> WARNING line appears
-if mse > MSE_THRESHOLD:
-    logging.warning(f"ALERT: Model MSE {mse:.2f} exceeded threshold {MSE_THRESHOLD}")
-else:
-    logging.info(f"MSE within acceptable range (threshold={MSE_THRESHOLD}).")
-# EXPECTED (times will differ):
-#   ... - INFO - Starting model training...
-#   ... - INFO - Model training completed.
-#   ... - INFO - Mean Squared Error: 2900.193628493482
-#   ... - INFO - Prediction latency: 0.000842 seconds
-#   ... - INFO - MSE within acceptable range (threshold=3500.0).
+datasets = {
+    "Oversampling": (X_over, y_over),
+    "Undersampling": (X_under, y_under),
+    "SMOTE": (X_smote, y_smote)
+}
 
-# ==================== CELL 8 : install prometheus_client ====================
-%pip install -q prometheus_client
+for name, (X_bal, y_bal) in datasets.items():
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_bal, y_bal, test_size=0.2, random_state=42,
+        stratify=y_bal
+    )
 
-# ==================== CELL 9 : expose metrics for Prometheus ====================
-# Run ONCE. "Duplicated timeseries" or "Address already in use" -> Restart kernel, Run All
-from prometheus_client import start_http_server, Gauge
+    model = DecisionTreeClassifier(random_state=42)
+    model.fit(X_train, y_train)
 
-MSE_GAUGE = Gauge('model_mse', 'Mean Squared Error of the deployed model')
-LATENCY_GAUGE = Gauge('model_prediction_latency_seconds', 'Prediction latency in seconds')
+    y_pred = model.predict(X_test)
 
-start_http_server(8000)
-MSE_GAUGE.set(mse)
-LATENCY_GAUGE.set(latency)
-print("Metrics exposed at http://127.0.0.1:8000/metrics")
-# Open the link -> Ctrl+F "model_" -> model_mse 2900.19..., model_prediction_latency_seconds ...
-# In production: Prometheus scrapes this endpoint, and a Grafana
-# alert rule (e.g. model_mse > 3500) triggers a notification.
+    print("\n", name)
+    print(classification_report(y_test, y_pred, zero_division=0))
 
-# ==================== CELL 10 : show the log file ====================
-print(open('mlops_monitoring.log').read())
+print("Class imbalance was analysed using a bar chart.")
+print("Oversampling, undersampling, and SMOTE were applied.")
+print("Classification reports were compared using precision, recall, and F1-score.")
+print("The best method can be selected based on minority-class performance.")
+
+
+Program 7- 
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.datasets import load_diabetes
+from sklearn.ensemble import IsolationForest
+from scipy.stats import zscore
+
+data = load_diabetes(as_frame=True)
+df = data.data
+
+print(df.head())
+print(df.describe())
+
+z = abs(zscore(df))
+anomalies_z = (z > 3).any(axis=1)
+print("Anomalies using Z-score:", anomalies_z.sum())
+
+Q1 = df.quantile(0.25)
+Q3 = df.quantile(0.75)
+IQR = Q3 - Q1
+anomalies_iqr = ((df < Q1 - 1.5 * IQR) | (df > Q3 + 1.5 * IQR)).any(axis=1)
+print("Anomalies using IQR:", anomalies_iqr.sum())
+
+plt.figure(figsize=(10, 5))
+df.boxplot()
+plt.title("Box Plot Before Removing Anomalies")
+plt.show()
+
+df_clean = df[~anomalies_iqr]
+print("Original Dataset Statistics:")
+print(df.describe())
+print("\nDataset After Removing Anomalies:")
+print(df_clean.describe())
+
+df.iloc[:, 0].hist(alpha=0.5, label="Original")
+df_clean.iloc[:, 0].hist(alpha=0.5, label="Cleaned")
+plt.title("Distribution Before and After Removing Anomalies")
+plt.xlabel("Feature Value")
+plt.ylabel("Frequency")
+plt.legend()
+plt.show()
+
+model = IsolationForest(contamination=0.05, random_state=42)
+df["Anomaly"] = model.fit_predict(data.data)
+print("Anomalies detected:", (df["Anomaly"] == -1).sum())
+print(df.head())
+
+print("Z-score and IQR were used to detect anomalies.")
+print("Box plots and histograms were used for visualization.")
+print("Statistics were compared before and after removing anomalies.")
+print("Isolation Forest was used for algorithm-based anomaly detection.")
+
+
+Program 8 -
+import pandas as pd
+import matplotlib.pyplot as plt
+from statsmodels.tsa.seasonal import seasonal_decompose
+from statsmodels.graphics.tsaplots import plot_acf
+
+data = pd.Series(
+    [20, 25, 30, 28, 35, 40, 38, 45, 50, 48, 55, 60,
+     40, 45, 50, 48, 55, 60, 58, 65, 70, 68, 75, 80],
+    index=pd.date_range(start="2024-01-01", periods=24, freq="MS")
+)
+
+print(data)
+
+data.plot()
+plt.title("Time Series Data")
+plt.xlabel("Month")
+plt.ylabel("Value")
+plt.show()
+
+result = seasonal_decompose(data, model="additive", period=12)
+
+result.plot()
+plt.show()
+
+moving_avg = data.rolling(window=3).mean()
+
+data.plot(label="Original")
+moving_avg.plot(label="Moving Average")
+
+plt.legend()
+plt.title("Moving Average")
+plt.show()
+
+plot_acf(data, lags=10)
+plt.title("Autocorrelation Plot")
+plt.show()
+
+print("Monthly values:")
+print(data)
+
+print("\nSeasonal Component:")
+print(result.seasonal)
+
+print("\nTrend Component:")
+print(result.trend)
+
+print("Time series data was plotted and decomposed.")
+print("Trend, seasonality, and residual components were analysed.")
+print("Moving average was used to observe the overall trend.")
+print("ACF was used to identify temporal dependencies.")
+print("Repeated patterns may indicate seasonality.")
